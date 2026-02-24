@@ -73,7 +73,6 @@ class MLPClassifier(nn.Module):
         self.flatten = nn.Flatten()
         self.fc1 = nn.Linear(3 * h * w, hidden_dim)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(p=0.2)
         self.fc2 = nn.Linear(hidden_dim, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -86,7 +85,6 @@ class MLPClassifier(nn.Module):
         x = self.flatten(x)
         x = self.fc1(x)
         x = self.relu(x)
-        x = self.dropout(x)
         x = self.fc2(x)
         return x
 
@@ -115,7 +113,6 @@ class MLPClassifierDeep(nn.Module):
         for i in range(num_layers):
             layers.append(nn.Linear(input_dim if i == 0 else hidden_dim, hidden_dim))
             layers.append(nn.ReLU())
-            layers.append(nn.Dropout(p=0.3))
         layers.append(nn.Linear(hidden_dim, num_classes))
         self.mlp = nn.Sequential(*layers)
 
@@ -152,12 +149,8 @@ class MLPClassifierDeepResidual(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.input_layer = nn.Linear(self.input_dim, hidden_dim)
-        self.input_dropout = nn.Dropout(p=0.3)
         self.hidden_layers = nn.ModuleList([
             nn.Linear(hidden_dim, hidden_dim) for _ in range(num_layers - 1)
-        ])
-        self.hidden_dropouts = nn.ModuleList([
-            nn.Dropout(p=0.3) for _ in range(num_layers - 1)
         ])
         self.relu = nn.ReLU()
         self.output_layer = nn.Linear(hidden_dim, num_classes)
@@ -172,12 +165,10 @@ class MLPClassifierDeepResidual(nn.Module):
         x = x.view(x.shape[0], -1)
         out = self.input_layer(x)
         out = self.relu(out)
-        out = self.input_dropout(out)
-        for layer, dropout in zip(self.hidden_layers, self.hidden_dropouts):
+        for layer in self.hidden_layers:
             residual = out
             out = layer(out)
             out = self.relu(out)
-            out = dropout(out)
             out = out + residual  # Residual connection
         out = self.output_layer(out)
         return out
