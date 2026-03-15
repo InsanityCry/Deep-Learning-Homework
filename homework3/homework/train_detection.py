@@ -1,58 +1,71 @@
+# Segments of code may be written with the aid of AI tools
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader
+from homework.datasets.road_dataset import load_data
 from homework.models import Detector, save_model
-import argparse
+import os
 
-from homework.datasets.road_dataset import load_data 
+# Settings
+DATASET_PATH = os.environ.get("DRIVE_DATASET", "../drive_data")
+BATCH_SIZE = 32
+EPOCHS = 20
+LR = 1e-3
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def train(args):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Training on {device}')
-    
-    model = Detector().to(device)
-    
-    # track is typically cross entropy, depth is L1/MSE
-    seg_criterion = nn.CrossEntropyLoss()
-    depth_criterion = nn.L1Loss()
-    
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    
-    train_loader = load_data('drive_data/train', transform_pipeline='default', batch_size=args.batch_size, shuffle=True)
-    
-    for epoch in range(args.epochs):
-        model.train()
-        train_loss = 0.0
-        
-        for batch in train_loader:
-            imgs = batch['image'].to(device)
-            seg_labels = batch['track'].to(device)
-            depth_labels = batch['depth'].to(device)
-            
-            optimizer.zero_grad()
-            seg_preds, depth_preds = model(imgs)
-            
-            loss_seg = seg_criterion(seg_preds, seg_labels)
-            loss_depth = depth_criterion(depth_preds, depth_labels)
-            loss = loss_seg + loss_depth
-            
-            loss.backward()
-            optimizer.step()
-            
-            train_loss += loss.item() * imgs.size(0)
-            
-        train_loss /= len(train_loader.dataset)
-        print(f'Epoch [{epoch+1}/{args.epochs}], Total Loss: {train_loss:.4f}')
-        
-        # Save model after each epoch
-        save_model(model)
-        print('Detector Model saved!')
+# Data
+train_loader = load_data(DATASET_PATH, split="train", batch_size=BATCH_SIZE, shuffle=True)
+val_loader = load_data(DATASET_PATH, split="val", batch_size=BATCH_SIZE, shuffle=False)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-lr', type=float, default=1e-3, help='Learning rate')
-    parser.add_argument('-b', '--batch_size', type=int, default=32, help='Batch size')
-    parser.add_argument('-e', '--epochs', type=int, default=10, help='Number of epochs')
-    args = parser.parse_args()
-    
-    train(args)
+# Model
+model = Detector().to(DEVICE)
+
+# Losses
+seg_criterion = nn.CrossEntropyLoss()
+depth_criterion = nn.L1Loss()
+optimizer = optim.Adam(model.parameters(), lr=LR)
+
+# Training loop
+for epoch in range(EPOCHS):
+    model.train()
+    total_seg_loss = 0
+    total_depth_loss = 0
+    total = 0
+    for batch in train_loader:
+        x = batch["image"].to(DEVICE)
+        seg = batch["track"].to(DEVICE)
+        depth = batch["depth"].to(DEVICE)
+        optimizer.zero_grad()
+        logits, pred_depth = model(x)
+        seg_loss = seg_criterion(logits, seg)
+        depth_loss = depth_criterion(pred_depth, depth)
+        loss = seg_loss + depth_loss
+        loss.backward()
+        optimizer.step()
+        total_seg_loss += seg_loss.item() * x.size(0)
+        total_depth_loss += depth_loss.item() * x.size(0)
+        total += x.size(0)
+    print(f"Epoch {epoch+1}/{EPOCHS} | Seg Loss: {total_seg_loss/total:.4f} | Depth Loss: {total_depth_loss/total:.4f}")
+
+    # Validation
+    model.eval()
+    val_seg_loss = 0
+    val_depth_loss = 0
+    val_total = 0
+    with torch.no_grad():
+        for batch in val_loader:
+            x = batch["image"].to(DEVICE)
+            seg = batch["track"].to(DEVICE)
+            depth = batch["depth"].to(DEVICE)
+            logits, pred_depth = model(x)
+            seg_loss = seg_criterion(logits, seg)
+            depth_loss = depth_criterion(pred_depth, depth)
+            val_seg_loss += seg_loss.item() * x.size(0)
+            val_depth_loss += depth_loss.item() * x.size(0)
+            val_total += x.size(0)
+    print(f"  Val Seg Loss: {val_seg_loss/val_total:.4f} | Val Depth Loss: {val_depth_loss/val_total:.4f}")
+
+# Save model
+save_model(model)
+print("Model saved.")
