@@ -15,8 +15,8 @@ LR = 1e-3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Data
-train_loader = load_data(DATASET_PATH, split="train", transform_pipeline="aug", batch_size=BATCH_SIZE, shuffle=True)
-val_loader = load_data(DATASET_PATH, split="val", transform_pipeline="default", batch_size=BATCH_SIZE, shuffle=False)
+train_loader = load_data(DATASET_PATH, split="train", batch_size=BATCH_SIZE, shuffle=True)
+val_loader = load_data(DATASET_PATH, split="val", batch_size=BATCH_SIZE, shuffle=False)
 
 # Model
 model = Detector().to(DEVICE)

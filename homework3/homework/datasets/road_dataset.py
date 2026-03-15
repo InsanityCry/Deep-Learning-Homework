@@ -39,20 +39,7 @@ class RoadDataset(Dataset):
                 ]
             )
         elif transform_pipeline == "aug":
-            # Add data augmentation for segmentation
-            xform = road_transforms.Compose(
-                [
-                    road_transforms.ImageLoader(self.episode_path),
-                    road_transforms.DepthLoader(self.episode_path),
-                    road_transforms.RandomHorizontalFlip(p=0.5),
-                    # Color jitter for image only
-                    lambda sample: {**sample, "image": (np.clip(np.transpose(np.array(
-                        tv_transforms.ColorJitter(0.3, 0.3, 0.3, 0.1)(
-                            Image.fromarray((np.transpose(sample["image"], (1,2,0))*255).astype(np.uint8))
-                        )), (2,0,1))/255.0, 0, 1).astype(np.float32)} if "image" in sample else sample,
-                    road_transforms.TrackProcessor(self.track),
-                ]
-            )
+            pass
 
         if xform is None:
             raise ValueError(f"Invalid transform {transform_pipeline} specified!")
