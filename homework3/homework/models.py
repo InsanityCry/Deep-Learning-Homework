@@ -110,16 +110,19 @@ class Detector(torch.nn.Module):
             nn.Conv2d(in_channels, 16, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(16),
             nn.ReLU(),
+            nn.Dropout2d(0.2),
         )
         self.down2 = nn.Sequential(
             nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
+            nn.Dropout2d(0.2),
         )
         self.down3 = nn.Sequential(
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
+            nn.Dropout2d(0.2),
         )
 
         # Bottleneck
@@ -127,6 +130,7 @@ class Detector(torch.nn.Module):
             nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
+            nn.Dropout2d(0.2),
         )
 
         # Upsampling path
@@ -134,16 +138,19 @@ class Detector(torch.nn.Module):
             nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
             nn.BatchNorm2d(64),
             nn.ReLU(),
+            nn.Dropout2d(0.2),
         )
         self.up2 = nn.Sequential(
             nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
             nn.BatchNorm2d(32),
             nn.ReLU(),
+            nn.Dropout2d(0.2),
         )
         self.up3 = nn.Sequential(
             nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2),
             nn.BatchNorm2d(16),
             nn.ReLU(),
+            nn.Dropout2d(0.2),
         )
 
         # Segmentation head
