@@ -176,10 +176,18 @@ class Detector(torch.nn.Module):
         d3 = self.down3(d2) # (B,64,H/8,W/8)
         b = self.bottleneck(d3) # (B,128,H/8,W/8)
 
-        # skip connections decoder
-        u1 = self.up1(b) + d3         # (B,64,H/4,W/4)
-        u2 = self.up2(u1) + d2        # (B,32,H/2,W/2)
-        u3 = self.up3(u2) + d1        # (B,16,H,W)
+        # skip connections decoder with shape matching
+        def match_shape(src, target):
+            if src.shape[2:] != target.shape[2:]:
+                src = torch.nn.functional.interpolate(src, size=target.shape[2:], mode="bilinear", align_corners=False)
+            return src
+
+        u1_ = self.up1(b)
+        u1 = u1_ + match_shape(d3, u1_)
+        u2_ = self.up2(u1)
+        u2 = u2_ + match_shape(d2, u2_)
+        u3_ = self.up3(u2)
+        u3 = u3_ + match_shape(d1, u3_)
 
         logits = self.segmentation_head(u3)  # (B, num_classes, H, W)
         raw_depth = self.depth_head(u3).squeeze(1)  # (B, H, W)
