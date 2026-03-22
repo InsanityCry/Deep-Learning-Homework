@@ -40,7 +40,7 @@ for epoch in range(EPOCHS):
         logits, pred_depth = model(x)
         seg_loss = seg_criterion(logits, seg)
         depth_loss = depth_criterion(pred_depth, depth)
-        loss = seg_loss + depth_loss
+        loss = seg_loss * 2.0 + depth_loss
         loss.backward()
         optimizer.step()
         total_seg_loss += seg_loss.item() * x.size(0)
