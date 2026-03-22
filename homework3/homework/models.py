@@ -176,10 +176,10 @@ class Detector(torch.nn.Module):
         d3 = self.down3(d2) # (B,64,H/8,W/8)
         b = self.bottleneck(d3) # (B,128,H/8,W/8)
 
-        # Decoder
-        u1 = self.up1(b)         # (B,64,H/4,W/4)
-        u2 = self.up2(u1)        # (B,32,H/2,W/2)
-        u3 = self.up3(u2)        # (B,16,H,W)
+        # skip connections decoder
+        u1 = self.up1(b) + d3         # (B,64,H/4,W/4)
+        u2 = self.up2(u1) + d2        # (B,32,H/2,W/2)
+        u3 = self.up3(u2) + d1        # (B,16,H,W)
 
         logits = self.segmentation_head(u3)  # (B, num_classes, H, W)
         raw_depth = self.depth_head(u3).squeeze(1)  # (B, H, W)
