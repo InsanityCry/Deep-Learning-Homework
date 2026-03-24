@@ -53,8 +53,8 @@ def main():
 
     device = torch.device(args.device)
     # Load data
-    train_loader = load_data(args.data, split='train', batch_size=args.batch_size, shuffle=True)
-    val_loader = load_data(args.data, split='val', batch_size=args.batch_size, shuffle=False)
+    train_loader = load_data(os.path.join(args.data, 'train'), batch_size=args.batch_size, shuffle=True)
+    val_loader = load_data(os.path.join(args.data, 'val'), batch_size=args.batch_size, shuffle=False)
 
     # Model
     model = load_model(args.model).to(device)
