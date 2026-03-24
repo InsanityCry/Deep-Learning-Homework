@@ -20,9 +20,13 @@ class MLPPlanner(nn.Module):
         input_dim = n_track * 2 * 2  # left/right, each with 2 coords
         output_dim = n_waypoints * 2
         self.mlp = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 256),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Dropout(0.2),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(256, 128),
             nn.ReLU(),
             nn.Linear(128, output_dim),
         )
@@ -52,7 +56,17 @@ class TransformerPlanner(nn.Module):
         self.n_track = n_track
         self.n_waypoints = n_waypoints
 
+        self.d_model = d_model
         self.query_embed = nn.Embedding(n_waypoints, d_model)
+        self.input_proj = nn.Linear(2, d_model)
+        decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=4, dim_feedforward=128, batch_first=True)
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=2)
+        self.output_proj = nn.Linear(d_model, 32)
+        self.final = nn.Sequential(
+            nn.LayerNorm(32),
+            nn.ReLU(),
+            nn.Linear(32, 2)
+        )
 
     def forward(
         self,
@@ -76,21 +90,12 @@ class TransformerPlanner(nn.Module):
         # Concatenate left and right boundaries
         b = track_left.shape[0]
         boundaries = torch.cat([track_left, track_right], dim=1)  # (b, 2*n_track, 2)
-        # Linear projection for input points
-        if not hasattr(self, 'input_proj'):
-            # Patch for legacy: add missing layers if not present
-            self.d_model = 64
-            self.input_proj = nn.Linear(2, self.d_model)
-            decoder_layer = nn.TransformerDecoderLayer(d_model=self.d_model, nhead=4, dim_feedforward=128, batch_first=True)
-            self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=2)
-            self.output_proj = nn.Linear(self.d_model, 2)
         memory = self.input_proj(boundaries)  # (b, 2*n_track, d_model)
-        # Queries: (b, n_waypoints, d_model)
         queries = self.query_embed.weight.unsqueeze(0).expand(b, -1, -1)
-        # Transformer decoder: queries attend to memory
         tgt = torch.zeros_like(queries)  # (b, n_waypoints, d_model)
         decoded = self.decoder(tgt=queries, memory=memory)  # (b, n_waypoints, d_model)
-        out = self.output_proj(decoded)  # (b, n_waypoints, 2)
+        out = self.output_proj(decoded)  # (b, n_waypoints, 32)
+        out = self.final(out)  # (b, n_waypoints, 2)
         return out
 
 
@@ -106,18 +111,27 @@ class CNNPlanner(torch.nn.Module):
         # CNN backbone
         self.features = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.MaxPool2d(2),
+            nn.Dropout2d(0.1),
             nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d(2),
+            nn.Dropout2d(0.1),
             nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(),
             nn.MaxPool2d(2),
+            nn.Dropout2d(0.1),
         )
         self.head = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(128 * 12 * 16, 128),
+            nn.Linear(128 * 12 * 16, 256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(256, 128),
             nn.ReLU(),
             nn.Linear(128, n_waypoints * 2),
         )
