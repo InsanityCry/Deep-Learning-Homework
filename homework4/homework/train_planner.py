@@ -1,116 +1,55 @@
 import argparse
-from pathlib import Path
 import torch
-import torch.utils.data
-from .models import MLPPlanner, save_model
+from .models import MLPPlanner, TransformerPlanner, CNNPlanner, save_model
 from .datasets.road_dataset import load_data
-from .metrics import PlannerMetric
 
 def train(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = MLPPlanner().to(device)
+    print(f"Training {args.model} on {device}")
+
+    if args.model == 'mlp_planner':
+        model = MLPPlanner().to(device)
+    elif args.model == 'transformer_planner':
+        model = TransformerPlanner().to(device)
+    elif args.model == 'cnn_planner':
+        model = CNNPlanner().to(device)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     loss_func = torch.nn.MSELoss()
     
-    train_data = load_data("drive_data/train", batch_size=args.batch_size)
-    val_data = load_data("drive_data/val", batch_size=args.batch_size)
-
-    for epoch in range(args.epochs):
-        model.train()
-        for batch in train_data:
-            track_left, track_right, waypoints = batch['track_left'].to(device), batch['track_right'].to(device), batch['waypoints'].to(device)
-            pred = model(track_left, track_right)
-            loss = loss_func(pred, waypoints)
-            
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-        
-        print(f"Epoch {epoch+1} complete.")
-
-"""
-Usage:
-    python3 -m homework.train_planner --model mlp_planner --epochs 30 --batch_size 64 --lr 1e-3
-"""
-
-import argparse
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from homework.models import load_model, save_model
-from homework.datasets.road_dataset import load_data
-import os
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='mlp_planner', choices=['mlp_planner', 'transformer_planner', 'cnn_planner'])
-    parser.add_argument('--epochs', type=int, default=30)
-    parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--lr', type=float, default=1e-3)
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
-    parser.add_argument('--data', type=str, default='../drive_data')
-    args = parser.parse_args()
-
-    device = torch.device(args.device)
-    # Load data
-    train_loader = load_data(os.path.join(args.data, 'train'), batch_size=args.batch_size, shuffle=True)
-    val_loader = load_data(os.path.join(args.data, 'val'), batch_size=args.batch_size, shuffle=False)
-
-    # Model
-    model = load_model(args.model).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    criterion = nn.MSELoss(reduction='none')
+    # CNN requires images, others require track points
+    train_data = load_data("drive_data/train", batch_size=args.batch_size, shuffle=True)
 
     for epoch in range(args.epochs):
         model.train()
         total_loss = 0
-        total = 0
-        for batch in train_loader:
-            optimizer.zero_grad()
+        for batch in train_data:
+            labels = batch['waypoints'].to(device)
+            
             if args.model == 'cnn_planner':
-                images = batch['image'].to(device)
-                pred = model(images)
+                inputs = batch['image'].to(device)
+                pred = model(inputs)
             else:
-                left = batch['track_left'].to(device)
-                right = batch['track_right'].to(device)
-                pred = model(left, right)
-            target = batch['waypoints'].to(device)
-            mask = batch.get('waypoints_mask', torch.ones(target.shape[:-1], dtype=torch.bool)).to(device)
-            # Compute loss only on valid waypoints
-            loss = criterion(pred, target)
-            mask = mask.unsqueeze(-1).expand_as(loss)
-            loss = loss[mask].mean()
+                t_left, t_right = batch['track_left'].to(device), batch['track_right'].to(device)
+                pred = model(t_left, t_right)
+            
+            loss = loss_func(pred, labels)
+            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            total_loss += loss.item() * pred.size(0)
-            total += pred.size(0)
-        print(f"Epoch {epoch+1}/{args.epochs} | Train Loss: {total_loss/total:.4f}")
+            total_loss += loss.item()
+        
+        if (epoch + 1) % 5 == 0 or epoch == 0:
+            print(f"Epoch {epoch+1}/{args.epochs}, Loss: {total_loss/len(train_data):.4f}")
 
-        # Validation
-        model.eval()
-        val_loss = 0
-        val_total = 0
-        with torch.no_grad():
-            for batch in val_loader:
-                if args.model == 'cnn_planner':
-                    images = batch['image'].to(device)
-                    pred = model(images)
-                else:
-                    left = batch['track_left'].to(device)
-                    right = batch['track_right'].to(device)
-                    pred = model(left, right)
-                target = batch['waypoints'].to(device)
-                mask = batch.get('waypoints_mask', torch.ones(target.shape[:-1], dtype=torch.bool)).to(device)
-                loss = criterion(pred, target)
-                mask = mask.unsqueeze(-1).expand_as(loss)
-                loss = loss[mask].mean()
-                val_loss += loss.item() * pred.size(0)
-                val_total += pred.size(0)
-        print(f"  Val Loss: {val_loss/val_total:.4f}")
-
-    # Save model
     save_model(model)
-    print("Model saved.")
+    print(f"{args.model} saved.")
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, choices=['mlp_planner', 'transformer_planner', 'cnn_planner'], default='mlp_planner')
+    parser.add_argument("--learning_rate", type=float, default=1e-3)
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--epochs", type=int, default=50)
+    args = parser.parse_args()
+    train(args)
