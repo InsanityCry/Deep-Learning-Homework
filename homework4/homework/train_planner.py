@@ -41,7 +41,7 @@ def train(args):
     elif args.model == 'cnn_planner':
         model = CNNPlanner().to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=1e-5)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1e-5)
 
     train_data = load_data('drive_data/train', batch_size=args.batch_size, shuffle=True)
 
