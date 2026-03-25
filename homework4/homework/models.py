@@ -13,7 +13,10 @@ class MLPPlanner(nn.Module):
         self.n_waypoints = n_waypoints
         input_dim = n_track * 2 * 2
         self.model = nn.Sequential(
-            nn.Linear(input_dim, 256),
+            nn.Linear(input_dim, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
             nn.BatchNorm1d(256),
             nn.ReLU(),
             nn.Linear(256, 128),
@@ -31,18 +34,32 @@ class TransformerPlanner(nn.Module):
         super().__init__()
         self.n_waypoints = n_waypoints
         self.input_proj = nn.Linear(2, d_model)
-        self.query_embed = nn.Embedding(n_waypoints, d_model)
-        decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=8, dim_feedforward=256, batch_first=True)
+
+        # Positional embedding for the input lane boundaries
+        self.pos_embed = nn.Parameter(torch.randn(1, n_track * 2, d_model) * 0.1)
+
+        # Learned query embeddings for the waypoints (latent array)
+        self.query_embed = nn.Parameter(torch.randn(1, n_waypoints, d_model) * 0.1)
+
+        # Perceiver-style cross-attention using TransformerDecoder
+        decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=8, dim_feedforward=512, batch_first=True)
         self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=4)
+
         self.output_proj = nn.Linear(d_model, 2)
 
     def forward(self, track_left, track_right, **kwargs):
         b = track_left.shape[0]
-        # Memory: points from both sides
+
+        # Keys and values: lane boundary features (byte array)
         combined = torch.cat([track_left, track_right], dim=1)
-        memory = self.input_proj(combined)
-        queries = self.query_embed.weight.unsqueeze(0).expand(b, -1, -1)
-        out = self.decoder(queries, memory)
+        memory = self.input_proj(combined) + self.pos_embed
+
+        # Queries: target waypoint embeddings
+        queries = self.query_embed.expand(b, -1, -1)
+
+        # Cross-attention over the lane boundaries
+        out = self.decoder(tgt=queries, memory=memory)
+
         return self.output_proj(out)
 
 class CNNPlanner(nn.Module):
@@ -51,7 +68,7 @@ class CNNPlanner(nn.Module):
         self.n_waypoints = n_waypoints
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN), persistent=False)
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD), persistent=False)
-        
+
         self.features = nn.Sequential(
             nn.Conv2d(3, 32, 5, stride=2, padding=2), nn.BatchNorm2d(32), nn.ReLU(),
             nn.Conv2d(32, 64, 3, stride=2, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
@@ -86,7 +103,7 @@ def load_model(model_name, device='cpu', with_weights=True):
         model = CNNPlanner()
     else:
         raise ValueError(f"Unknown model {model_name}")
-    
+
     if with_weights:
         model_path = path.join(HOMEWORK_DIR, f'{model_name}.th')
         if path.exists(model_path):
