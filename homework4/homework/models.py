@@ -12,29 +12,56 @@ class MLPPlanner(nn.Module):
         super().__init__()
         self.n_track = n_track
         self.n_waypoints = n_waypoints
-        input_dim = n_track * 2 * 2
+        # Use left/right boundaries, centerline, and lane width as inputs.
+        input_dim = n_track * 2 * 4
         self.model = nn.Sequential(
             nn.Linear(input_dim, 512),
-            nn.BatchNorm1d(512),
+            nn.LayerNorm(512),
             nn.ReLU(),
+            nn.Dropout(0.1),
             nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
+            nn.LayerNorm(256),
             nn.ReLU(),
+            nn.Dropout(0.1),
             nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
+            nn.LayerNorm(128),
             nn.ReLU(),
             nn.Linear(128, n_waypoints * 2)
         )
 
+    def _centerline_anchor(self, track_left: torch.Tensor, track_right: torch.Tensor) -> torch.Tensor:
+        center = 0.5 * (track_left + track_right)
+
+        idx = torch.linspace(1, self.n_track - 1, self.n_waypoints, device=center.device)
+        idx0 = idx.floor().long().clamp(max=self.n_track - 1)
+        idx1 = (idx0 + 1).clamp(max=self.n_track - 1)
+        alpha = (idx - idx0.float()).view(1, -1, 1)
+
+        p0 = center[:, idx0]
+        p1 = center[:, idx1]
+        return p0 * (1.0 - alpha) + p1 * alpha
+
     def forward(self, track_left, track_right, **kwargs):
-        x = torch.cat([track_left, track_right], dim=1).view(track_left.shape[0], -1)
-        return self.model(x).view(-1, self.n_waypoints, 2)
+        center = 0.5 * (track_left + track_right)
+        width = track_right - track_left
+        anchor = self._centerline_anchor(track_left, track_right)
+
+        x = torch.cat([track_left, track_right, center, width], dim=2).reshape(track_left.shape[0], -1)
+        residual = self.model(x).view(-1, self.n_waypoints, 2)
+        return anchor + residual
 
 class TransformerPlanner(nn.Module):
     def __init__(self, n_track: int = 10, n_waypoints: int = 3, d_model: int = 128):
         super().__init__()
+        self.n_track = n_track
         self.n_waypoints = n_waypoints
-        self.input_proj = nn.Linear(2, d_model)
+        self.input_proj = nn.Sequential(
+            nn.Linear(2, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, d_model),
+        )
+        self.side_embed = nn.Embedding(2, d_model)
+        self.anchor_proj = nn.Linear(2, d_model)
 
         # Positional embedding for the input lane boundaries
         self.pos_embed = nn.Parameter(torch.randn(1, n_track * 2, d_model) * 0.1)
@@ -43,25 +70,56 @@ class TransformerPlanner(nn.Module):
         self.query_embed = nn.Parameter(torch.randn(1, n_waypoints, d_model) * 0.1)
 
         # Perceiver-style cross-attention using TransformerDecoder
-        decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=8, dim_feedforward=512, batch_first=True)
-        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=4)
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=d_model,
+            nhead=8,
+            dim_feedforward=512,
+            dropout=0.1,
+            batch_first=True,
+        )
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=3)
 
-        self.output_proj = nn.Linear(d_model, 2)
+        self.output_proj = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, 2),
+        )
+
+    def _centerline_anchor(self, track_left: torch.Tensor, track_right: torch.Tensor) -> torch.Tensor:
+        center = 0.5 * (track_left + track_right)
+
+        idx = torch.linspace(1, self.n_track - 1, self.n_waypoints, device=center.device)
+        idx0 = idx.floor().long().clamp(max=self.n_track - 1)
+        idx1 = (idx0 + 1).clamp(max=self.n_track - 1)
+        alpha = (idx - idx0.float()).view(1, -1, 1)
+
+        p0 = center[:, idx0]
+        p1 = center[:, idx1]
+        return p0 * (1.0 - alpha) + p1 * alpha
 
     def forward(self, track_left, track_right, **kwargs):
         b = track_left.shape[0]
 
         # Keys and values: lane boundary features (byte array)
         combined = torch.cat([track_left, track_right], dim=1)
-        memory = self.input_proj(combined) + self.pos_embed
+        memory = self.input_proj(combined)
 
-        # Queries: target waypoint embeddings
-        queries = self.query_embed.expand(b, -1, -1)
+        side_ids = torch.cat([
+            torch.zeros(self.n_track, device=combined.device, dtype=torch.long),
+            torch.ones(self.n_track, device=combined.device, dtype=torch.long),
+        ]).view(1, -1)
+        memory = memory + self.side_embed(side_ids) + self.pos_embed
+
+        anchor = self._centerline_anchor(track_left, track_right)
+
+        # Queries: learned embedding plus projected centerline anchor
+        queries = self.query_embed.expand(b, -1, -1) + self.anchor_proj(anchor)
 
         # Cross-attention over the lane boundaries
         out = self.decoder(tgt=queries, memory=memory)
 
-        return self.output_proj(out)
+        residual = self.output_proj(out)
+        return anchor + residual
 
 class CNNPlanner(nn.Module):
     def __init__(self, n_waypoints: int = 3):

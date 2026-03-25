@@ -60,7 +60,7 @@ def train(args):
                 t_left, t_right = batch['track_left'].to(device), batch['track_right'].to(device)
                 pred = model(t_left, t_right)
 
-            lateral_weight = 4.0 if args.model != 'cnn_planner' else 2.0
+            lateral_weight = 8.0 if args.model == 'mlp_planner' else 6.0 if args.model == 'transformer_planner' else 2.0
             loss = planner_loss(pred, labels, labels_mask, lateral_weight=lateral_weight)
 
             optimizer.zero_grad()
