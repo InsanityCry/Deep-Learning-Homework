@@ -1,9 +1,22 @@
+# Segments of code may be written with the aid of AI tools
 import argparse
 import torch
 import random
 import torch.nn.functional as F
 from .models import MLPPlanner, TransformerPlanner, CNNPlanner, save_model
 from .datasets.road_dataset import load_data
+
+
+def planner_loss(pred, labels, labels_mask, lateral_weight: float = 4.0):
+    coord_weights = pred.new_tensor([1.0, lateral_weight]).view(1, 1, 2)
+    valid_mask = labels_mask[..., None].float()
+
+    # Smooth L1 is less sensitive to occasional noisy waypoints than plain MSE.
+    loss = F.smooth_l1_loss(pred, labels, reduction='none')
+    loss = loss * coord_weights * valid_mask
+
+    normalizer = valid_mask.sum() * pred.shape[-1]
+    return loss.sum() / normalizer.clamp_min(1.0)
 
 def augment_batch(batch, model_type):
     if random.random() > 0.5:
@@ -38,6 +51,7 @@ def train(args):
         for batch in train_data:
             batch = augment_batch(batch, args.model)
             labels = batch['waypoints'].to(device)
+            labels_mask = batch['waypoints_mask'].to(device)
 
             if args.model == 'cnn_planner':
                 inputs = batch['image'].to(device)
@@ -46,10 +60,8 @@ def train(args):
                 t_left, t_right = batch['track_left'].to(device), batch['track_right'].to(device)
                 pred = model(t_left, t_right)
 
-            # Weighted L2 (MSE) loss
-            loss = (pred - labels) ** 2
-            loss[..., 0] *= 10.0  # Heavier penalty for lateral error
-            loss = loss.mean()
+            lateral_weight = 4.0 if args.model != 'cnn_planner' else 2.0
+            loss = planner_loss(pred, labels, labels_mask, lateral_weight=lateral_weight)
 
             optimizer.zero_grad()
             loss.backward()
