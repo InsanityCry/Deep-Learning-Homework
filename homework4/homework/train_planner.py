@@ -77,8 +77,10 @@ def train(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, choices=['mlp_planner', 'transformer_planner', 'cnn_planner'], default='mlp_planner')
-    parser.add_argument('--learning_rate', type=float, default=1e-3)
+    parser.add_argument('--learning_rate', type=float, default=None)
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=150)
     args = parser.parse_args()
+    if args.learning_rate is None:
+        args.learning_rate = 1e-6 if args.model == 'transformer_planner' else 1e-3
     train(args)
