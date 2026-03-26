@@ -41,7 +41,10 @@ def train(args):
     elif args.model == 'cnn_planner':
         model = CNNPlanner().to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1e-5)
+    if args.model == 'mlp_planner':
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=0.0)
+    else:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1e-5)
 
     train_data = load_data('drive_data/train', batch_size=args.batch_size, shuffle=True)
 
@@ -60,7 +63,7 @@ def train(args):
                 t_left, t_right = batch['track_left'].to(device), batch['track_right'].to(device)
                 pred = model(t_left, t_right)
 
-            lateral_weight = 8.0 if args.model == 'mlp_planner' else 6.0 if args.model == 'transformer_planner' else 2.0
+            lateral_weight = 5.0 if args.model == 'mlp_planner' else 6.0 if args.model == 'transformer_planner' else 2.0
             loss = planner_loss(pred, labels, labels_mask, lateral_weight=lateral_weight)
 
             optimizer.zero_grad()

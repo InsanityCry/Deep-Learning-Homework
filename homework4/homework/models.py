@@ -18,11 +18,9 @@ class MLPPlanner(nn.Module):
             nn.Linear(input_dim, 512),
             nn.LayerNorm(512),
             nn.ReLU(),
-            nn.Dropout(0.1),
             nn.Linear(512, 256),
             nn.LayerNorm(256),
             nn.ReLU(),
-            nn.Dropout(0.1),
             nn.Linear(256, 128),
             nn.LayerNorm(128),
             nn.ReLU(),
@@ -31,15 +29,9 @@ class MLPPlanner(nn.Module):
 
     def _centerline_anchor(self, track_left: torch.Tensor, track_right: torch.Tensor) -> torch.Tensor:
         center = 0.5 * (track_left + track_right)
-
-        idx = torch.linspace(1, self.n_track - 1, self.n_waypoints, device=center.device)
-        idx0 = idx.floor().long().clamp(max=self.n_track - 1)
-        idx1 = (idx0 + 1).clamp(max=self.n_track - 1)
-        alpha = (idx - idx0.float()).view(1, -1, 1)
-
-        p0 = center[:, idx0]
-        p1 = center[:, idx1]
-        return p0 * (1.0 - alpha) + p1 * alpha
+        # Waypoint targets are short-horizon, so anchor to nearby centerline samples.
+        idx = torch.arange(1, self.n_waypoints + 1, device=center.device).clamp(max=self.n_track - 1)
+        return center[:, idx]
 
     def forward(self, track_left, track_right, **kwargs):
         center = 0.5 * (track_left + track_right)
